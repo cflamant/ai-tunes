@@ -4,6 +4,8 @@ neural network, as well as tools to convert outputted piano roll format
 music into MIDI files to be played.
 """
 import os
+import numpy as np
+import pretty_midi as pm
 
 
 def get_files_list(dirName, recursive=True):
@@ -60,7 +62,7 @@ def write_files_list(midipaths, filename):
 
     with open(filename, 'w') as f:
         for item in midipaths:
-            f.write("%s\n" % item)
+            f.write(f"{item}\n")
 
 
 def read_files_list(filename):
@@ -80,3 +82,59 @@ def read_files_list(filename):
 
     midipaths = [line.rstrip('\n') for line in open(filename)]
     return midipaths
+
+
+def piano_roll_to_instrument(piano_roll, fs=100, program=0):
+    """Converts a Piano Roll array into notes added to a single instrument.
+
+    Parameters
+    ----------
+    piano_roll : np.ndarray, shape=(128,frames), dtype=int
+        Piano roll of one instrument
+    fs : int
+        Sampling frequency of the columns, i.e. each column is spaced apart
+        by ``1./fs`` seconds.
+    program : int
+        The program number of the instrument
+    Returns
+    -------
+    inst : pretty_midi.Instrument
+        A pretty_midi.Instrument class instance with notes corresponding to
+        the piano roll.
+    """
+
+    npitch = piano_roll.shape[0]  # Expect 128
+    inst = pm.Instrument(program=program)
+
+    for i in range(npitch):
+        # Get indices of nonzero elements
+        idxs = np.nonzero(piano_roll[i, :])[0]
+        j = 0
+        # whether that note pitch is currently playing
+        playing = False
+        start = 0.
+        pitch = i
+        while j < idxs.shape[0]:
+            # If not currently playing, start a new note
+            if not playing:
+                stime = idxs[j]
+                start = stime*(1./fs)
+                playing = True
+                j += 1
+                stime += 1
+            elif idxs[j] != stime:  # Terminate previous note, restart loop
+                playing = False
+                # Note ended after previous nonzero frame
+                end = (idxs[j-1]+1)*(1./fs)
+                note = pm.Note(velocity=100, pitch=pitch, start=start, end=end)
+                inst.notes.append(note)
+            else:
+                # Note is being held; increment curr. time and continue
+                stime += 1
+                j += 1
+        if playing:
+            # If still playing at the end of the piano roll, terminate the note
+            end = (idxs[j-1]+1)*(1./fs)
+            note = pm.Note(velocity=100, pitch=pitch, start=start, end=end)
+            inst.notes.append(note)
+    return inst

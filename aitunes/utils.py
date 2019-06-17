@@ -137,3 +137,4 @@ def piano_roll_to_instrument(piano_roll, fs=100, program=0):
             end = (idxs[j-1]+1)*(1./fs)
             note = pm.Note(velocity=100, pitch=pitch, start=start, end=end)
             inst.notes.append(note)
+    return inst

@@ -138,3 +138,17 @@ def piano_roll_to_instrument(piano_roll, fs=100, program=0):
             note = pm.Note(velocity=100, pitch=pitch, start=start, end=end)
             inst.notes.append(note)
     return inst
+
+
+def analyze_tracks(midipaths):
+    """Produces statistics on the MIDI files given in the list of
+    paths to the songs.
+
+    Parameters
+    ----------
+    midipaths : list of str
+        List of full paths to MIDI files.
+    Returns
+    -------
+    none
+    """

@@ -6,6 +6,7 @@ music into MIDI files to be played.
 import os
 import numpy as np
 import pretty_midi as pm
+from .statusbar import progress
 
 
 def get_files_list(dirName, recursive=True):
@@ -84,6 +85,29 @@ def read_files_list(filename):
     return midipaths
 
 
+def prune_files_list(midipaths, min_len=10., min_insts=1):
+    """Go through MIDI files specified by list of paths and remove
+    any path whose file either does not load properly in pretty_midi,
+    or does not meet the minimum length or number of instrument
+    requirements specified.
+
+    Parameters
+    ----------
+    midipaths : list of str
+        List of full paths to MIDI files.
+    min_len : float
+        Minimum required length of MIDI file in seconds
+    min_insts : int
+        Minimum number of instruments required in track
+
+    Returns
+    -------
+    pruned_midipaths : list of str
+        List of full paths to validated and pruned MIDI files.
+    """
+    # TODO
+
+
 def piano_roll_to_instrument(piano_roll, fs=100, program=0):
     """Converts a Piano Roll array into notes added to a single instrument.
 
@@ -150,5 +174,35 @@ def analyze_tracks(midipaths):
         List of full paths to MIDI files.
     Returns
     -------
-    none
+    none # TODO
     """
+    inst_nums = []
+    song_lengths = []
+    inst_types = []
+    drum_types = []
+    pitches = []
+    numpaths = len(midipaths)
+    for i, midipath in enumerate(midipaths):
+        try:
+            md = pm.PrettyMIDI(midipath)
+        except:
+            print(midipath + " is invalid.")
+        else:
+            progress(i, numpaths, status=str(i+1) + '/' + str(numpaths))
+
+            inst_nums.append(len(md.instruments))
+            song_lengths.append(md.get_end_time())
+            for inst in md.instruments:
+                if not inst.is_drum:
+                    inst_types.append(inst.program)
+                    for note in inst.notes:
+                        pitches.append(note.pitch)
+                else:
+                    for note in inst.notes:
+                        drum_types.append(note.pitch)
+    inst_nums = np.array(inst_nums)
+    song_lengths = np.array(song_lengths)
+    inst_types = np.array(inst_types)
+    drum_types = np.array(drum_types)
+    pitches = np.array(pitches)
+    return inst_nums, song_lengths, inst_types, drum_types, pitches

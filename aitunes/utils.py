@@ -7,6 +7,8 @@ import os
 import numpy as np
 import pretty_midi as pm
 from .statusbar import progress
+from mido.midifiles.meta import KeySignatureError
+import warnings
 
 
 def get_files_list(dirName, recursive=True):
@@ -85,7 +87,8 @@ def read_files_list(filename):
     return midipaths
 
 
-def prune_files_list(midipaths, min_len=10., min_insts=1):
+def prune_files_list(midipaths, min_len=10., min_insts=1,
+                     ignorewarnings=True, verbose=1):
     """Go through MIDI files specified by list of paths and remove
     any path whose file either does not load properly in pretty_midi,
     or does not meet the minimum length or number of instrument
@@ -99,13 +102,44 @@ def prune_files_list(midipaths, min_len=10., min_insts=1):
         Minimum required length of MIDI file in seconds
     min_insts : int
         Minimum number of instruments required in track
+    ignorewarnings : bool
+        Whether to ignore warnings when determining the validity
+        of MIDI file. Usually raised by pretty_midi if the MIDI file
+        might not be a valid type 0 or type 1. Default is True since
+        it seems that most files raising this error are not strongly
+        misinterpreted.
+    verbose : int
+        Whether to print out which file paths are not valid. 0 is for
+        no output, 1 is for just printing the file path of offending
+        files, and 2 is for printing the file path and the reason.
+        1 and 2 print how many files are kept.
 
     Returns
     -------
     pruned_midipaths : list of str
         List of full paths to validated and pruned MIDI files.
     """
-    # TODO
+    pruned_midipaths = []
+    numpaths = len(midipaths)
+    if ignorewarnings:
+        warnings.filterwarnings('ignore')
+    else:
+        warnings.filterwarnings('error')
+    for i, midipath in enumerate(midipaths):
+        try:
+            pm.PrettyMIDI(midipath)
+        except (KeySignatureError, Warning) as e:
+            if verbose:
+                print(midipath)
+                if verbose > 1:
+                    print(e)
+        else:
+            progress(i, numpaths, status=str(i+1) + '/' + str(numpaths))
+
+            pruned_midipaths.append(midipath)
+    if verbose > 0:
+        print(f"{len(pruned_midipaths)} of {numpaths} MIDI paths kept.")
+    return pruned_midipaths
 
 
 def piano_roll_to_instrument(piano_roll, fs=100, program=0):
@@ -164,7 +198,7 @@ def piano_roll_to_instrument(piano_roll, fs=100, program=0):
     return inst
 
 
-def analyze_tracks(midipaths):
+def analyze_tracks(midipaths, verbose=0):
     """Produces statistics on the MIDI files given in the list of
     paths to the songs.
 
@@ -172,6 +206,10 @@ def analyze_tracks(midipaths):
     ----------
     midipaths : list of str
         List of full paths to MIDI files.
+    verbose : int
+        0 suppresses all print statements. 1 or higher prints when
+        invalid MIDI files are encountered.
+
     Returns
     -------
     none # TODO
@@ -182,11 +220,13 @@ def analyze_tracks(midipaths):
     drum_types = []
     pitches = []
     numpaths = len(midipaths)
+
     for i, midipath in enumerate(midipaths):
         try:
             md = pm.PrettyMIDI(midipath)
-        except:
-            print(midipath + " is invalid.")
+        except KeySignatureError:
+            if verbose:
+                print(midipath + " is invalid.")
         else:
             progress(i, numpaths, status=str(i+1) + '/' + str(numpaths))
 

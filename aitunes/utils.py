@@ -6,9 +6,9 @@ music into MIDI files to be played.
 import os
 import numpy as np
 import pretty_midi as pm
-from .statusbar import progress
 from mido.midifiles.meta import KeySignatureError
 import warnings
+from tqdm import tqdm
 
 
 def get_files_list(dirName, recursive=True):
@@ -87,7 +87,7 @@ def read_files_list(filename):
     return midipaths
 
 
-def prune_files_list(midipaths, min_len=10., min_insts=1,
+def prune_files_list(midipaths, min_len=10., max_len=1000., min_insts=1,
                      ignorewarnings=True, verbose=1):
     """Go through MIDI files specified by list of paths and remove
     any path whose file either does not load properly in pretty_midi,
@@ -100,6 +100,10 @@ def prune_files_list(midipaths, min_len=10., min_insts=1,
         List of full paths to MIDI files.
     min_len : float
         Minimum required length of MIDI file in seconds
+    max_len : float
+        Maxmimum allowed length in seconds. Useful to prevent memory
+        issues later on when generating piano rolls if the file is
+        corrupt or nonsensically long.
     min_insts : int
         Minimum number of instruments required in track
     ignorewarnings : bool
@@ -118,6 +122,7 @@ def prune_files_list(midipaths, min_len=10., min_insts=1,
     -------
     pruned_midipaths : list of str
         List of full paths to validated and pruned MIDI files.
+
     """
     pruned_midipaths = []
     numpaths = len(midipaths)
@@ -125,18 +130,28 @@ def prune_files_list(midipaths, min_len=10., min_insts=1,
         warnings.filterwarnings('ignore')
     else:
         warnings.filterwarnings('error')
-    for i, midipath in enumerate(midipaths):
+    for midipath in tqdm(midipaths):
         try:
-            pm.PrettyMIDI(midipath)
-        except (KeySignatureError, Warning) as e:
+            md = pm.PrettyMIDI(midipath)
+        except (KeySignatureError, IOError, EOFError, ValueError,
+                IndexError, ZeroDivisionError, Exception, Warning) as e:
             if verbose:
                 print(midipath)
                 if verbose > 1:
                     print(e)
         else:
-            progress(i, numpaths, status=str(i+1) + '/' + str(numpaths))
-
-            pruned_midipaths.append(midipath)
+            numinst = len(md.instruments)
+            endtime = md.get_end_time()
+            if (numinst >= min_insts and
+                    min_len <= endtime <= max_len):
+                pruned_midipaths.append(midipath)
+            else:
+                if verbose:
+                    print(midipath)
+                    if verbose > 1:
+                        print("Not enough instruments, or length unaccepted.")
+                        print(f"Length: {endtime:.2f} s, ",
+                              f"Number of Instruments: {numinst}")
     if verbose > 0:
         print(f"{len(pruned_midipaths)} of {numpaths} MIDI paths kept.")
     return pruned_midipaths
@@ -159,6 +174,7 @@ def piano_roll_to_instrument(piano_roll, fs=100, program=0):
     inst : pretty_midi.Instrument
         A pretty_midi.Instrument class instance with notes corresponding to
         the piano roll.
+
     """
 
     npitch = piano_roll.shape[0]  # Expect 128
@@ -213,6 +229,7 @@ def analyze_tracks(midipaths, verbose=0):
     Returns
     -------
     none # TODO
+
     """
     inst_nums = []
     song_lengths = []
@@ -220,16 +237,17 @@ def analyze_tracks(midipaths, verbose=0):
     drum_types = []
     pitches = []
     numpaths = len(midipaths)
+    print(numpaths)  # TODO remove
 
-    for i, midipath in enumerate(midipaths):
+    for i, midipath in tqdm(enumerate(midipaths)):
         try:
             md = pm.PrettyMIDI(midipath)
-        except KeySignatureError:
+        except (KeySignatureError, IOError, EOFError, ValueError,
+                IndexError, ZeroDivisionError, Exception) as e:
             if verbose:
                 print(midipath + " is invalid.")
+                print(e)
         else:
-            progress(i, numpaths, status=str(i+1) + '/' + str(numpaths))
-
             inst_nums.append(len(md.instruments))
             song_lengths.append(md.get_end_time())
             for inst in md.instruments:

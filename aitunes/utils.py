@@ -230,6 +230,9 @@ def analyze_tracks(midipaths, verbose=0):
     -------
     none # TODO
 
+    TODO: Finish up this method; would be useful to reduce the size
+    of the NN by removing unused pitches.
+
     """
     inst_nums = []
     song_lengths = []

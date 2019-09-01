@@ -157,18 +157,163 @@ def prune_files_list(midipaths, min_len=10., max_len=1000., min_insts=1,
     return pruned_midipaths
 
 
-def piano_roll_to_instrument(piano_roll, fs=100, program=0):
-    """Converts a Piano Roll array into notes added to a single instrument.
+def midi_to_piano_stack(pmo, fs=100, samples=1000, max_inst=16):
+    """Turns a PrettyMIDI object into a stack of piano rolls specifying
+    when notes are playing for each of the instruments (and drum track).
+    An array of the instrument types (programs) are returned as well.
+
+    The instruments are ordered by the number of notes played, so
+    specifying a maximum number of instruments less than the number
+    on the MIDI file keeps the instruments that played the most notes.
 
     Parameters
     ----------
-    piano_roll : np.ndarray, shape=(128,frames), dtype=int
+    pmo : PrettyMIDI instance
+        PrettyMIDI object corresponding to MIDI file
+    fs : int
+        Sampling rate of piano rolls (samples/sec)
+    samples : int
+        Number of samples (piano roll length)
+    max_inst : int
+        Maximum number of instruments in piano stack, not including the
+        drum track at index 0 of the stack.
+
+    Returns
+    -------
+    piano_stack : np.ndarray, shape=(max_inst+1,128,samples), dtype=int
+        "Stack" of piano rolls. First index corresponds to instrument, sorted
+        in descending order by the number of notes the instruments play.
+        Index 0 corresponds to the drum track. If not present, it is an
+        array of zeros.
+    programs : np.ndarray, shape=(max_inst,), dtype=int
+        Programs (instrument type) of each piano roll in the stack, excluding
+        the drum.
+
+    """
+    insts_nodrum = []
+    drum = None
+    for inst in pmo.instruments:
+        if not inst.is_drum:
+            insts_nodrum.append(inst)
+        else:
+            drum = inst
+    num_inst = len(insts_nodrum)
+    kept_inst = min(num_inst, max_inst)
+
+    num_notes = np.zeros(num_inst, dtype=int)
+    for i, inst in enumerate(insts_nodrum):
+        num_notes[i] = len(inst.notes)
+    si = num_notes.argsort()  # sorted indices of insts by num notes
+
+    # Produce array of programs (instrument type)
+    programs = np.full((max_inst,), -1, dtype=int)
+    for i in range(kept_inst):
+        programs[i] = insts_nodrum[si[i]].program
+    # Note in the above, if num_inst<max_inst programs will have -1 in spots
+    # lacking an instrument
+
+    # Produce piano_stack
+    piano_stack = np.zeros((max_inst+1, 128, samples), dtype=int)
+    # Drums first
+    if drum:
+        drum_roll = _get_drum_roll(drum, fs=fs)
+        end = min(drum_roll.shape[1], samples)
+        piano_stack[0, :, :end] = drum_roll[:, :end]
+    # Rest of instruments next
+    for i in range(kept_inst):
+        piano_roll = insts_nodrum[si[i]].get_piano_roll(fs=fs)
+        end = min(piano_roll.shape[1], samples)
+        piano_stack[i+1, :, :end] = piano_roll[:, :end]
+
+    return piano_stack, programs
+
+
+def _get_drum_roll(drum, fs=100):
+    """Get the "piano" roll for a drum instrument.
+
+    Parameters
+    ----------
+    drum : pretty_midi.Instrument
+        Drum instrument
+    fs : int
+        Sampling rate of piano rolls (samples/sec)
+
+    Returns
+    -------
+    drum_roll : np.ndarray, shape=(128, int(drum.get_end_time()*fs))
+        Drum roll corresponding to notes played by drum track.
+
+    """
+    endtime = int(drum.get_end_time()*fs)
+    drum_roll = np.zeros((128, endtime), dtype=int)
+    for note in drum.notes:
+        keynum = note.pitch
+        strt = int(note.start * fs)
+        end = min(int(note.end * fs), endtime)
+        if strt == end and end != endtime:
+            end += 1
+        drum_roll[keynum, strt:end] = 1
+    return drum_roll
+
+
+def piano_stack_to_midi(piano_stack, programs, fs=100):
+    """Converts a stack of piano rolls into a PrettyMIDI object.
+    Essentially it is the inverse of midi_to_piano_stack.
+
+    Parameters
+    ----------
+    piano_stack : np.ndarray, shape=(max_inst+1,128,samples), dtype=int
+        "Stack" of piano rolls. First index corresponds to instrument, sorted
+        in descending order by the number of notes the instruments play.
+        Index 0 corresponds to the drum track. If not present, it is an
+        array of zeros.
+    programs : np.ndarray, shape=(max_inst,), dtype=int
+        Programs (instrument type) of each piano roll in the stack, excluding
+        the drum.
+    fs : int
+        Sampling frequency of the columns, i.e. each column is spaced apart
+        by ``1./fs`` seconds.
+
+    Returns
+    -------
+    pmo : PrettyMIDI instance
+        PrettyMIDI object corresponding to MIDI file
+
+    """
+
+    max_inst = programs.shape[0]
+    num_inst = 0
+    # if the program is -1, the instrument is not present
+    while num_inst < max_inst and programs[num_inst] >= 0:
+        num_inst += 1
+
+    pmo = pm.PrettyMIDI()
+    for i in range(num_inst):
+        inst = piano_roll_to_instrument(piano_stack[i+1, :, :],
+                                        fs=fs,
+                                        program=programs[i])
+        pmo.instruments.append(inst)
+    drum = piano_roll_to_instrument(piano_stack[0, :, :], fs=fs, is_drum=True)
+    pmo.instruments.append(drum)
+    return pmo
+
+
+def piano_roll_to_instrument(piano_roll, fs=100, program=0, is_drum=False):
+    """Converts a Piano Roll array into notes added to a single instrument.
+    Also works if passed a drum roll.
+
+    Parameters
+    ----------
+    piano_roll : np.ndarray, shape=(128,samples), dtype=int
         Piano roll of one instrument
     fs : int
         Sampling frequency of the columns, i.e. each column is spaced apart
         by ``1./fs`` seconds.
     program : int
         The program number of the instrument
+    is_drum : bool
+        Whether the piano_roll is a drum roll
+
     Returns
     -------
     inst : pretty_midi.Instrument
@@ -178,7 +323,7 @@ def piano_roll_to_instrument(piano_roll, fs=100, program=0):
     """
 
     npitch = piano_roll.shape[0]  # Expect 128
-    inst = pm.Instrument(program=program)
+    inst = pm.Instrument(program=program, is_drum=is_drum)
 
     for i in range(npitch):
         # Get indices of nonzero elements

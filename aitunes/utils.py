@@ -215,7 +215,7 @@ def midi_to_piano_stack(pmo, fs=100, samples=1000, max_inst=16):
     # Produce piano_stack
     piano_stack = np.zeros((max_inst+1, 128, samples), dtype=int)
     # Drums first
-    if drum:
+    if drum is not None:
         drum_roll = _get_drum_roll(drum, fs=fs)
         end = min(drum_roll.shape[1], samples)
         piano_stack[0, :, :end] = drum_roll[:, :end]

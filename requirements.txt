@@ -2,3 +2,4 @@
 numpy
 pretty_midi
 tqdm
+torch
